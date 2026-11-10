@@ -1,7 +1,7 @@
 name: Build Android APK
 
 on:
-  workflow_dispatch: # Permet de lancer le bouton manuellement en 1 clic
+  workflow_dispatch:
 
 jobs:
   build:
@@ -18,23 +18,44 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: 3. Configuration Node.js 20
+      - name: 3. Configuration Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 4. Configuration Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: 4. Installation des dépendances
-        run: npm install
+      - name: 5. Nettoyage automatique des images manquantes
+        run: |
+          node -e '
+            const fs = require("fs");
+            if (fs.existsSync("app.json")) {
+              const app = JSON.parse(fs.readFileSync("app.json", "utf8"));
+              delete app.expo.icon;
+              delete app.expo.splash;
+              if (app.expo.android) delete app.expo.android.adaptiveIcon;
+              fs.writeFileSync("app.json", JSON.stringify(app, null, 2));
+            }
+          '
 
-      - name: 5. Génération du projet Android
-        run: npx expo prebuild --platform android --clean
+      - name: 6. Installation des dépendances
+        run: npm install --legacy-peer-deps
 
-      - name: 6. Compilation de l'APK
+      - name: 7. Génération du projet Android
+        run: npx expo prebuild --platform android --clean --no-install
+
+      - name: 8. Autoriser les permissions d'exécution Linux
+        run: chmod +x android/gradlew
+
+      - name: 9. Compilation finale de l'APK
         working-directory: android
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m"
         run: ./gradlew assembleDebug --no-daemon
 
-      - name: 7. Mise à disposition de l'APK
+      - name: 10. Mise à disposition du fichier APK
         uses: actions/upload-artifact@v4
         with:
-          name: Mon-VTC-Gestion-Installable
+          name: Mon-VTC-Gestion-APK
           path: android/app/build/outputs/apk/debug/*.apk
