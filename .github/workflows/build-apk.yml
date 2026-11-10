@@ -18,15 +18,12 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: 3. Configuration Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: 4. Configuration Node.js 20
+      - name: 3. Configuration Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '20'
 
-      - name: 5. Nettoyage automatique des images manquantes
+      - name: 4. Nettoyage des références d'images
         run: |
           node -e '
             const fs = require("fs");
@@ -39,22 +36,23 @@ jobs:
             }
           '
 
-      - name: 6. Installation des dépendances
-        run: npm install --legacy-peer-deps
+      - name: 5. Installation des dépendances
+        run: npm install
 
-      - name: 7. Génération du projet Android
+      - name: 6. Génération du projet Android
         run: npx expo prebuild --platform android --clean --no-install
 
-      - name: 8. Autoriser les permissions d'exécution Linux
+      - name: 7. Permissions d'exécution Linux
         run: chmod +x android/gradlew
 
-      - name: 9. Compilation finale de l'APK
+      - name: 8. Compilation de l'APK
         working-directory: android
         env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m"
         run: ./gradlew assembleDebug --no-daemon
 
-      - name: 10. Mise à disposition du fichier APK
+      - name: 9. Téléchargement du fichier APK
         uses: actions/upload-artifact@v4
         with:
           name: Mon-VTC-Gestion-APK
