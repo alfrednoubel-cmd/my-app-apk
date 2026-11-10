@@ -23,7 +23,7 @@ jobs:
         with:
           node-version: '20'
 
-      - name: 4. Nettoyage des références d'images
+      - name: 4. Désactiver la New Architecture et nettoyer app.json
         run: |
           node -e '
             const fs = require("fs");
@@ -32,20 +32,26 @@ jobs:
               delete app.expo.icon;
               delete app.expo.splash;
               if (app.expo.android) delete app.expo.android.adaptiveIcon;
+              app.expo.newArchEnabled = false;
               fs.writeFileSync("app.json", JSON.stringify(app, null, 2));
             }
           '
 
-      - name: 5. Installation des dépendances
-        run: npm install
+      - name: 5. Installation des dépendances et alignement Expo SDK 52
+        run: |
+          npm install --legacy-peer-deps
+          npx expo install --fix
 
       - name: 6. Génération du projet Android
         run: npx expo prebuild --platform android --clean --no-install
 
-      - name: 7. Permissions d'exécution Linux
-        run: chmod +x android/gradlew
+      - name: 7. Permissions Linux et configuration mémoire Kotlin
+        run: |
+          chmod +x android/gradlew
+          echo "kotlin.daemon.jvm.options=-Xmx2048m" >> android/gradle.properties
+          echo "newArchEnabled=false" >> android/gradle.properties
 
-      - name: 8. Compilation de l'APK
+      - name: 8. Compilation de l'APK (assembleDebug)
         working-directory: android
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
