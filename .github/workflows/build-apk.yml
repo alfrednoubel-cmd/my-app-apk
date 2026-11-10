@@ -1,0 +1,40 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch: # Permet de lancer le bouton manuellement en 1 clic
+
+jobs:
+  build:
+    name: Compilation APK Android
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Récupération du code
+        uses: actions/checkout@v4
+
+      - name: 2. Configuration Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 3. Configuration Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 4. Installation des dépendances
+        run: npm install
+
+      - name: 5. Génération du projet Android
+        run: npx expo prebuild --platform android --clean
+
+      - name: 6. Compilation de l'APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: 7. Mise à disposition de l'APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mon-VTC-Gestion-Installable
+          path: android/app/build/outputs/apk/debug/*.apk
