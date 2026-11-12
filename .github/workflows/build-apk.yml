@@ -37,8 +37,9 @@ jobs:
             }
           '
 
-      - name: 5. Installation des dépendances
+      - name: 5. Installation des dépendances et du module GPS
         run: |
+          npm install expo-location@~18.0.4 --save --legacy-peer-deps
           npm install --legacy-peer-deps
           npx expo install --fix
 
