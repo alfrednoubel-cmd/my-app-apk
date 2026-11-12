@@ -255,7 +255,7 @@ export const QuickBookingScreen: React.FC<QuickBookingScreenProps> = ({
           reservation_datetime: resDateTimeObj.toISOString(),
           pickup_datetime: pickupDateTimeObj.toISOString(),
           pickup_address: pickupAddress.trim(),
-          dropoff_address: dropoffAddress.trim>,
+          dropoff_address: dropoffAddress.trim(),
           agreed_price: priceNum,
           passenger_count: parseInt(passengers, 10) || 1,
           flight_train_number: flightTrainNumber.trim() || undefined,
