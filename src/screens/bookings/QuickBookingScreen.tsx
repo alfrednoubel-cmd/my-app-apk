@@ -1,6 +1,6 @@
 // ==============================================================================
-// FORMULAIRE EXPRESS : BON DE COMMANDE EN MOINS DE 30 SECONDES
-// Optimisé pour un chauffeur au volant ou entre deux courses
+// FORMULAIRE EXPRESS & MODIFICATION : BON DE COMMANDE VTC
+// Choix de l'horodatage de réservation, localisation GPS et modification complète
 // ==============================================================================
 
 import React, { useState, useEffect } from 'react';
@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   Alert,
   Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { colors, radius, spacing, typography } from '../../constants/theme';
 import { Header } from '../../components/ui/Header';
@@ -23,10 +24,13 @@ import { useClientStore } from '../../stores/useClientStore';
 import { useBookingStore } from '../../stores/useBookingStore';
 import { useProfileStore } from '../../stores/useProfileStore';
 import { Client, Booking } from '../../types/models';
+import { locationService } from '../../services/locationService';
 
 interface QuickBookingScreenProps {
   onBack: () => void;
   onBookingCreated: (booking: Booking, client: Client) => void;
+  bookingToEdit?: Booking;
+  clientToEdit?: Client;
 }
 
 // Modèles de trajets fréquents VTC en 1 clic
@@ -60,42 +64,82 @@ const FREQUENT_ROUTES = [
 export const QuickBookingScreen: React.FC<QuickBookingScreenProps> = ({
   onBack,
   onBookingCreated,
+  bookingToEdit,
+  clientToEdit,
 }) => {
   const { user } = useAuthStore();
   const { profile } = useProfileStore();
   const { clients, loadClients, addClient } = useClientStore();
-  const { createBooking, isCreating } = useBookingStore();
+  const { createBooking, updateBooking, isCreating } = useBookingStore();
 
-  // ÉTAT DU FORMULAIRE EXPRESS
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const isEditing = !!bookingToEdit;
+
+  // 1. DATE ET HEURE DE RÉSERVATION (QUAND LE CLIENT A FAIT LA DEMANDE)
+  const initialResDate = bookingToEdit
+    ? bookingToEdit.reservation_datetime.slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
+  const initialResTime = bookingToEdit
+    ? new Date(bookingToEdit.reservation_datetime).toLocaleTimeString('fr-FR', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : (() => {
+        const d = new Date();
+        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      })();
+
+  const [reservationDate, setReservationDate] = useState(initialResDate);
+  const [reservationTime, setReservationTime] = useState(initialResTime);
+
+  // 2. CLIENT
+  const [selectedClient, setSelectedClient] = useState<Client | null>(
+    clientToEdit || null
+  );
   const [clientSearch, setClientSearch] = useState('');
   const [showClientModal, setShowClientModal] = useState(false);
 
-  // NOUVEAU CLIENT RAPIDE (SI NON EXISTANT)
   const [quickName, setQuickName] = useState('');
   const [quickPhone, setQuickPhone] = useState('');
   const [quickType, setQuickType] = useState<'particulier' | 'entreprise'>('particulier');
 
-  // TRAJET
-  const [pickupDate, setPickupDate] = useState(() => {
-    const d = new Date();
-    d.setMinutes(d.getMinutes() + 15); // +15 min par défaut
-    return d.toISOString().slice(0, 10);
-  });
-  const [pickupTime, setPickupTime] = useState(() => {
-    const d = new Date();
-    d.setMinutes(d.getMinutes() + 15);
-    const h = String(d.getHours()).padStart(2, '0');
-    const m = String(d.getMinutes()).padStart(2, '0');
-    return `${h}:${m}`;
-  });
+  // 3. PRISE EN CHARGE SOUHAITÉE (DATE ET HEURE DU DÉPART)
+  const initialPickupDate = bookingToEdit
+    ? bookingToEdit.pickup_datetime.slice(0, 10)
+    : (() => {
+        const d = new Date();
+        d.setMinutes(d.getMinutes() + 15);
+        return d.toISOString().slice(0, 10);
+      })();
+  const initialPickupTime = bookingToEdit
+    ? new Date(bookingToEdit.pickup_datetime).toLocaleTimeString('fr-FR', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : (() => {
+        const d = new Date();
+        d.setMinutes(d.getMinutes() + 15);
+        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      })();
 
-  const [pickupAddress, setPickupAddress] = useState('');
-  const [dropoffAddress, setDropoffAddress] = useState('');
-  const [agreedPrice, setAgreedPrice] = useState('');
-  const [passengers, setPassengers] = useState('1');
-  const [flightTrainNumber, setFlightTrainNumber] = useState('');
-  const [notes, setNotes] = useState('');
+  const [pickupDate, setPickupDate] = useState(initialPickupDate);
+  const [pickupTime, setPickupTime] = useState(initialPickupTime);
+
+  // 4. ITINÉRAIRE & DÉTAILS
+  const [pickupAddress, setPickupAddress] = useState(bookingToEdit?.pickup_address || '');
+  const [dropoffAddress, setDropoffAddress] = useState(bookingToEdit?.dropoff_address || '');
+  const [agreedPrice, setAgreedPrice] = useState(
+    bookingToEdit ? String(bookingToEdit.agreed_price) : ''
+  );
+  const [passengers, setPassengers] = useState(
+    bookingToEdit ? String(bookingToEdit.passenger_count) : '1'
+  );
+  const [flightTrainNumber, setFlightTrainNumber] = useState(
+    bookingToEdit?.flight_train_number || ''
+  );
+  const [notes, setNotes] = useState(bookingToEdit?.notes || '');
+
+  // GPS État de chargement
+  const [isLocatingGps, setIsLocatingGps] = useState(false);
 
   const userId = user?.id || 'demo-user-1';
 
@@ -103,7 +147,30 @@ export const QuickBookingScreen: React.FC<QuickBookingScreenProps> = ({
     loadClients(userId);
   }, [userId]);
 
-  // Appliquer un modèle fréquent en 1 tap
+  // Réinitialiser la date/heure de réservation à "Maintenant"
+  const handleSetReservationToNow = () => {
+    const now = new Date();
+    setReservationDate(now.toISOString().slice(0, 10));
+    setReservationTime(
+      `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+    );
+  };
+
+  // Localisation GPS directe de l'adresse de départ
+  const handleLocateGps = async () => {
+    setIsLocatingGps(true);
+    try {
+      const address = await locationService.getCurrentAddress();
+      setPickupAddress(address);
+      Alert.alert('📍 Position GPS trouvée', `Adresse définie :\n${address}`);
+    } catch (err: any) {
+      Alert.alert('Erreur GPS', err.message || 'Impossible de récupérer la position GPS.');
+    } finally {
+      setIsLocatingGps(false);
+    }
+  };
+
+  // Appliquer un modèle fréquent
   const applyPreset = (preset: (typeof FREQUENT_ROUTES)[0]) => {
     setPickupAddress(preset.pickup);
     setDropoffAddress(preset.dropoff);
@@ -131,7 +198,7 @@ export const QuickBookingScreen: React.FC<QuickBookingScreenProps> = ({
     setQuickPhone('');
   };
 
-  // Validation finale du Bon de Commande VTC
+  // Validation finale du Bon de Commande (création ou modification)
   const handleValidateBooking = async () => {
     if (!profile?.revtc_number || !profile?.siret) {
       Alert.alert(
@@ -157,27 +224,65 @@ export const QuickBookingScreen: React.FC<QuickBookingScreenProps> = ({
       return;
     }
 
-    // Combiner date et heure
-    const [hours, minutes] = pickupTime.split(':').map((v) => parseInt(v, 10) || 0);
+    // Combiner date et heure de prise en charge
+    const [pHours, pMinutes] = pickupTime.split(':').map((v) => parseInt(v, 10) || 0);
     const pickupDateTimeObj = new Date(pickupDate);
-    pickupDateTimeObj.setHours(hours, minutes, 0, 0);
+    pickupDateTimeObj.setHours(pHours, pMinutes, 0, 0);
+
+    // Combiner date et heure de la demande de réservation
+    const [rHours, rMinutes] = reservationTime.split(':').map((v) => parseInt(v, 10) || 0);
+    const resDateTimeObj = new Date(reservationDate);
+    resDateTimeObj.setHours(rHours, rMinutes, 0, 0);
 
     try {
-      const created = await createBooking(userId, {
-        client_id: selectedClient.id,
-        pickup_datetime: pickupDateTimeObj.toISOString(),
-        pickup_address: pickupAddress.trim(),
-        dropoff_address: dropoffAddress.trim(),
-        agreed_price: priceNum,
-        passenger_count: parseInt(passengers, 10) || 1,
-        flight_train_number: flightTrainNumber.trim() || undefined,
-        notes: notes.trim() || undefined,
-        status: 'confirmed',
-      });
+      if (isEditing && bookingToEdit) {
+        // Mode modification
+        await updateBooking(bookingToEdit.id, {
+          client_id: selectedClient.id,
+          reservation_datetime: resDateTimeObj.toISOString(),
+          pickup_datetime: pickupDateTimeObj.toISOString(),
+          pickup_address: pickupAddress.trim(),
+          dropoff_address: dropoffAddress.trim(),
+          agreed_price: priceNum,
+          passenger_count: parseInt(passengers, 10) || 1,
+          flight_train_number: flightTrainNumber.trim() || undefined,
+          notes: notes.trim() || undefined,
+        });
 
-      onBookingCreated(created, selectedClient);
+        const updated = {
+          ...bookingToEdit,
+          client_id: selectedClient.id,
+          reservation_datetime: resDateTimeObj.toISOString(),
+          pickup_datetime: pickupDateTimeObj.toISOString(),
+          pickup_address: pickupAddress.trim(),
+          dropoff_address: dropoffAddress.trim>,
+          agreed_price: priceNum,
+          passenger_count: parseInt(passengers, 10) || 1,
+          flight_train_number: flightTrainNumber.trim() || undefined,
+          notes: notes.trim() || undefined,
+        };
+
+        Alert.alert('Succès', 'Le bon de commande a été mis à jour.');
+        onBookingCreated(updated, selectedClient);
+      } else {
+        // Mode création
+        const created = await createBooking(userId, {
+          client_id: selectedClient.id,
+          reservation_datetime: resDateTimeObj.toISOString(),
+          pickup_datetime: pickupDateTimeObj.toISOString(),
+          pickup_address: pickupAddress.trim(),
+          dropoff_address: dropoffAddress.trim(),
+          agreed_price: priceNum,
+          passenger_count: parseInt(passengers, 10) || 1,
+          flight_train_number: flightTrainNumber.trim() || undefined,
+          notes: notes.trim() || undefined,
+          status: 'confirmed',
+        });
+
+        onBookingCreated(created, selectedClient);
+      }
     } catch (err: any) {
-      Alert.alert('Erreur', err.message || 'Impossible de créer la réservation.');
+      Alert.alert('Erreur', err.message || 'Impossible d’enregistrer la réservation.');
     }
   };
 
@@ -194,8 +299,8 @@ export const QuickBookingScreen: React.FC<QuickBookingScreenProps> = ({
   return (
     <View style={styles.container}>
       <Header
-        title="Nouveau Bon de Commande"
-        subtitle="Création express & justificatif réglementaire"
+        title={isEditing ? `Modifier ${bookingToEdit?.booking_number}` : 'Nouveau Bon de Commande'}
+        subtitle={isEditing ? 'Mise à jour des informations' : 'Création express & justificatif légal'}
         onBack={onBack}
       />
 
@@ -204,29 +309,59 @@ export const QuickBookingScreen: React.FC<QuickBookingScreenProps> = ({
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* MODÈLES EN 1 CLIC */}
-        <Text style={styles.sectionTitle}>Modèles de trajets fréquents (1 tap)</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.presetsScroll}
-          contentContainerStyle={styles.presetsContent}
-        >
-          {FREQUENT_ROUTES.map((route, idx) => (
-            <TouchableOpacity
-              key={idx}
-              style={styles.presetChip}
-              onPress={() => applyPreset(route)}
-              activeOpacity={0.7}
+        {/* MODÈLES EN 1 CLIC (SI CRÉATION) */}
+        {!isEditing && (
+          <>
+            <Text style={styles.sectionTitle}>Modèles fréquents (1 tap)</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.presetsScroll}
+              contentContainerStyle={styles.presetsContent}
             >
-              <Text style={styles.presetTitle}>{route.name}</Text>
-              <Text style={styles.presetPrice}>{route.price} €</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+              {FREQUENT_ROUTES.map((route, idx) => (
+                <TouchableOpacity
+                  key={idx}
+                  style={styles.presetChip}
+                  onPress={() => applyPreset(route)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.presetTitle}>{route.name}</Text>
+                  <Text style={styles.presetPrice}>{route.price} €</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </>
+        )}
 
-        {/* SECTION 1 : SÉLECTION DU CLIENT */}
-        <Text style={styles.sectionTitle}>1. Client / Donneur d'ordre</Text>
+        {/* SECTION 1 : DATE ET HEURE DE RÉSERVATION (CHOIX LIBRE PAR LE CHAUFFEUR) */}
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>1. Quand le client a réservé ?</Text>
+          <TouchableOpacity onPress={handleSetReservationToNow}>
+            <Text style={styles.linkText}>⚡ Mettre à maintenant</Text>
+          </TouchableOpacity>
+        </View>
+        <Card style={styles.card}>
+          <View style={styles.row}>
+            <Input
+              label="Date réservation (AAAA-MM-JJ)"
+              value={reservationDate}
+              onChangeText={setReservationDate}
+              containerStyle={styles.halfInput}
+              required
+            />
+            <Input
+              label="Heure réservation (HH:MM)"
+              value={reservationTime}
+              onChangeText={setReservationTime}
+              containerStyle={styles.halfInput}
+              required
+            />
+          </View>
+        </Card>
+
+        {/* SECTION 2 : SÉLECTION DU CLIENT */}
+        <Text style={styles.sectionTitle}>2. Client / Donneur d'ordre</Text>
         <Card style={styles.card}>
           {selectedClient ? (
             <View style={styles.clientSelectedRow}>
@@ -287,19 +422,19 @@ export const QuickBookingScreen: React.FC<QuickBookingScreenProps> = ({
           )}
         </Card>
 
-        {/* SECTION 2 : DATE & HEURE DE PRISE EN CHARGE */}
-        <Text style={styles.sectionTitle}>2. Prise en charge souhaitée</Text>
+        {/* SECTION 3 : DATE & HEURE DE PRISE EN CHARGE */}
+        <Text style={styles.sectionTitle}>3. Prise en charge souhaitée (Départ)</Text>
         <Card style={styles.card}>
           <View style={styles.row}>
             <Input
-              label="Date (AAAA-MM-JJ)"
+              label="Date course (AAAA-MM-JJ)"
               value={pickupDate}
               onChangeText={setPickupDate}
               containerStyle={styles.halfInput}
               required
             />
             <Input
-              label="Heure (HH:MM)"
+              label="Heure course (HH:MM)"
               value={pickupTime}
               onChangeText={setPickupTime}
               containerStyle={styles.halfInput}
@@ -308,8 +443,21 @@ export const QuickBookingScreen: React.FC<QuickBookingScreenProps> = ({
           </View>
         </Card>
 
-        {/* SECTION 3 : ADRESSES */}
-        <Text style={styles.sectionTitle}>3. Itinéraire de la course</Text>
+        {/* SECTION 4 : ADRESSES AVEC BOUTON GPS */}
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>4. Itinéraire de la course</Text>
+          <TouchableOpacity
+            style={styles.gpsBtn}
+            onPress={handleLocateGps}
+            disabled={isLocatingGps}
+          >
+            {isLocatingGps ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <Text style={styles.gpsBtnText}>📍 Me localiser (GPS)</Text>
+            )}
+          </TouchableOpacity>
+        </View>
         <Card style={styles.card}>
           <Input
             label="Adresse de départ (Prise en charge)"
@@ -329,8 +477,8 @@ export const QuickBookingScreen: React.FC<QuickBookingScreenProps> = ({
           />
         </Card>
 
-        {/* SECTION 4 : PRIX & PASSAGERS */}
-        <Text style={styles.sectionTitle}>4. Prix & Détails</Text>
+        {/* SECTION 5 : PRIX & PASSAGERS */}
+        <Text style={styles.sectionTitle}>5. Prix convenu & Détails</Text>
         <Card style={styles.card}>
           <View style={styles.row}>
             <Input
@@ -366,9 +514,9 @@ export const QuickBookingScreen: React.FC<QuickBookingScreenProps> = ({
           />
         </Card>
 
-        {/* BOUTON DE VALIDATION INSTANTANÉ */}
+        {/* BOUTON DE VALIDATION */}
         <Button
-          title="⚡ Générer le Justificatif VTC"
+          title={isEditing ? '💾 Enregistrer les modifications' : '⚡ Générer le Justificatif VTC'}
           onPress={handleValidateBooking}
           loading={isCreating}
           size="lg"
@@ -385,10 +533,7 @@ export const QuickBookingScreen: React.FC<QuickBookingScreenProps> = ({
 
             <View style={styles.typeSelector}>
               <TouchableOpacity
-                style={[
-                  styles.typeBtn,
-                  quickType === 'particulier' && styles.typeBtnActive,
-                ]}
+                style={[styles.typeBtn, quickType === 'particulier' && styles.typeBtnActive]}
                 onPress={() => setQuickType('particulier')}
               >
                 <Text
@@ -401,10 +546,7 @@ export const QuickBookingScreen: React.FC<QuickBookingScreenProps> = ({
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[
-                  styles.typeBtn,
-                  quickType === 'entreprise' && styles.typeBtnActive,
-                ]}
+                style={[styles.typeBtn, quickType === 'entreprise' && styles.typeBtnActive]}
                 onPress={() => setQuickType('entreprise')}
               >
                 <Text
@@ -468,6 +610,31 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginBottom: spacing.xs,
     marginTop: spacing.md,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  linkText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  gpsBtn: {
+    backgroundColor: 'rgba(37, 99, 235, 0.15)',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  gpsBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
   },
   presetsScroll: {
     marginBottom: spacing.md,

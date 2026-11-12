@@ -28,6 +28,8 @@ interface InvoiceState {
     reason: string
   ) => Promise<{ creditNote: Invoice; items: InvoiceItem[] }>;
   updateInvoiceStatus: (id: string, status: InvoiceStatus) => Promise<boolean>;
+  updateInvoice: (id: string, updates: Partial<Invoice>, items?: InvoiceItem[]) => Promise<boolean>;
+  deleteInvoice: (id: string) => Promise<boolean>;
   getInvoiceById: (id: string) => Invoice | undefined;
   getItemsForInvoice: (invoiceId: string) => InvoiceItem[];
 }
@@ -295,6 +297,47 @@ export const useInvoiceStore = create<InvoiceState>((set, get) => ({
 
     try {
       await supabase.from('invoices').update({ status }).eq('id', id);
+    } catch {
+      // Offline
+    }
+    return true;
+  },
+
+  updateInvoice: async (id, updates, items) => {
+    const nowIso = new Date().toISOString();
+    const updatedInvoices = get().invoices.map((inv) =>
+      inv.id === id ? { ...inv, ...updates, updated_at: nowIso } : inv
+    );
+    const updatedItemsMap = { ...get().invoiceItemsMap };
+    if (items) {
+      updatedItemsMap[id] = items;
+    }
+
+    set({ invoices: updatedInvoices, invoiceItemsMap: updatedItemsMap });
+    await localStorage.setItem(localStorage.keys.INVOICES, updatedInvoices);
+    if (items) {
+      await localStorage.setItem('@mon_vtc_invoice_items', updatedItemsMap);
+    }
+
+    try {
+      await supabase.from('invoices').update({ ...updates, updated_at: nowIso }).eq('id', id);
+    } catch {
+      // Offline
+    }
+    return true;
+  },
+
+  deleteInvoice: async (id) => {
+    const filteredInvoices = get().invoices.filter((inv) => inv.id !== id);
+    const updatedItemsMap = { ...get().invoiceItemsMap };
+    delete updatedItemsMap[id];
+
+    set({ invoices: filteredInvoices, invoiceItemsMap: updatedItemsMap });
+    await localStorage.setItem(localStorage.keys.INVOICES, filteredInvoices);
+    await localStorage.setItem('@mon_vtc_invoice_items', updatedItemsMap);
+
+    try {
+      await supabase.from('invoices').delete().eq('id', id);
     } catch {
       // Offline
     }

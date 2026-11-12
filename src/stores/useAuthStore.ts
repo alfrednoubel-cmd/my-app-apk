@@ -37,13 +37,13 @@ export const useAuthStore = create<AuthState>((set) => ({
         };
         set({ user: u, isAuthenticated: true, isLoading: false });
       } else {
-        // Mode secours local si session enregistrée
-        const cachedUser = await localStorage.getItem<User>(localStorage.keys.AUTH_TOKEN);
-        if (cachedUser) {
-          set({ user: cachedUser, isAuthenticated: true, isLoading: false });
-        } else {
-          set({ user: null, isAuthenticated: false, isLoading: false });
-        }
+        // Connexion automatique directe pour le chauffeur indépendant
+        const defaultUser: User = {
+          id: '00000000-0000-0000-0000-000000000001',
+          email: 'chauffeur.vtc@mon-vtc.fr',
+        };
+        const cachedUser = (await localStorage.getItem<User>(localStorage.keys.AUTH_TOKEN)) || defaultUser;
+        set({ user: cachedUser, isAuthenticated: true, isLoading: false });
       }
     } catch {
       set({ isLoading: false });

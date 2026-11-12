@@ -34,6 +34,7 @@ type Screen =
   | 'dashboard'
   | 'settings'
   | 'quick_booking'
+  | 'edit_booking'
   | 'booking_detail'
   | 'convert_booking_to_invoice'
   | 'invoice_detail'
@@ -51,6 +52,7 @@ export default function App() {
 
   const [currentScreen, setCurrentScreen] = useState<Screen>('dashboard');
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [bookingToEdit, setBookingToEdit] = useState<Booking | null>(null);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
 
@@ -78,11 +80,19 @@ export default function App() {
     );
   }
 
-  // Navigation après création d'un bon de commande
+  // Navigation après création ou modification d'un bon de commande
   const handleBookingCreated = (booking: Booking, client: Client) => {
     setSelectedBooking(booking);
+    setBookingToEdit(null);
     setSelectedClient(client);
     setCurrentScreen('booking_detail');
+  };
+
+  // Modification d'un bon de commande
+  const handleEditBooking = (booking: Booking, client: Client) => {
+    setBookingToEdit(booking);
+    setSelectedClient(client);
+    setCurrentScreen('edit_booking');
   };
 
   // Sélection d'une réservation depuis le tableau de bord
@@ -152,11 +162,21 @@ export default function App() {
             />
           )}
 
+          {currentScreen === 'edit_booking' && bookingToEdit && (
+            <QuickBookingScreen
+              bookingToEdit={bookingToEdit}
+              clientToEdit={selectedClient || undefined}
+              onBack={() => setCurrentScreen('booking_detail')}
+              onBookingCreated={handleBookingCreated}
+            />
+          )}
+
           {currentScreen === 'booking_detail' && selectedBooking && selectedClient && (
             <BookingDetailScreen
               booking={selectedBooking}
               client={selectedClient}
               onBack={() => setCurrentScreen('dashboard')}
+              onEditBooking={handleEditBooking}
               onConvertToInvoice={handleStartInvoiceConversion}
             />
           )}

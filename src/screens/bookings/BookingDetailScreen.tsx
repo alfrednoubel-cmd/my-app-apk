@@ -27,6 +27,7 @@ interface BookingDetailScreenProps {
   booking: Booking;
   client: Client;
   onBack: () => void;
+  onEditBooking?: (booking: Booking, client: Client) => void;
   onConvertToInvoice?: (booking: Booking, client: Client) => void;
 }
 
@@ -34,10 +35,11 @@ export const BookingDetailScreen: React.FC<BookingDetailScreenProps> = ({
   booking: initialBooking,
   client,
   onBack,
+  onEditBooking,
   onConvertToInvoice,
 }) => {
   const { profile } = useProfileStore();
-  const { updateBookingStatus } = useBookingStore();
+  const { updateBookingStatus, deleteBooking } = useBookingStore();
   const [booking, setBooking] = useState<Booking>(initialBooking);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
@@ -59,6 +61,36 @@ export const BookingDetailScreen: React.FC<BookingDetailScreenProps> = ({
     hour: '2-digit',
     minute: '2-digit',
   });
+
+  // Action : Afficher directement le PDF plein écran
+  const handlePreviewPdf = async () => {
+    if (!profile) return;
+    try {
+      await pdfService.previewBookingPdf(booking, profile, client);
+    } catch (err: any) {
+      Alert.alert('Erreur affichage PDF', err.message || 'Impossible d’afficher le PDF.');
+    }
+  };
+
+  // Action : Supprimer le bon de commande
+  const handleDeleteBooking = () => {
+    Alert.alert(
+      'Supprimer le bon de commande',
+      `Êtes-vous sûr de vouloir supprimer définitivement le bon de commande ${booking.booking_number} ?`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            await deleteBooking(booking.id);
+            Alert.alert('Supprimé', 'Le bon de commande a été supprimé.');
+            onBack();
+          },
+        },
+      ]
+    );
+  };
 
   // Action : Générer et Partager le PDF
   const handleSharePdf = async () => {
@@ -132,6 +164,15 @@ export const BookingDetailScreen: React.FC<BookingDetailScreenProps> = ({
             Présentable immédiatement à toute réquisition des forces de l'ordre
           </Text>
         </Card>
+
+        {/* BOUTON D'AFFICHAGE DIRECT DU BON DE COMMANDE EN PDF */}
+        <Button
+          title="👁️ Afficher le Bon de Commande en PDF"
+          onPress={handlePreviewPdf}
+          variant="gold"
+          size="lg"
+          style={{ marginBottom: spacing.md }}
+        />
 
         {/* ACTIONS DE PARTAGE DIRECT */}
         <View style={styles.shareRow}>
@@ -280,6 +321,25 @@ export const BookingDetailScreen: React.FC<BookingDetailScreenProps> = ({
             style={styles.actionBtn}
           />
         )}
+        {/* BOUTONS DE MODIFICATION ET SUPPRESSION */}
+        <View style={styles.editDeleteRow}>
+          {onEditBooking && (
+            <Button
+              title="✏️ Modifier"
+              onPress={() => onEditBooking(booking, client)}
+              variant="outline"
+              size="md"
+              style={styles.halfBtn}
+            />
+          )}
+          <Button
+            title="🗑️ Supprimer"
+            onPress={handleDeleteBooking}
+            variant="danger"
+            size="md"
+            style={styles.halfBtn}
+          />
+        </View>
       </ScrollView>
     </View>
   );
@@ -440,5 +500,14 @@ const styles = StyleSheet.create({
   },
   actionBtn: {
     marginBottom: spacing.md,
+  },
+  editDeleteRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  halfBtn: {
+    flex: 1,
   },
 });

@@ -320,6 +320,14 @@ export const pdfService = {
   },
 
   /**
+   * Ouvre la prévisualisation plein écran / impression du bon de commande PDF
+   */
+  async previewBookingPdf(booking: Booking, profile: Profile, client: Client): Promise<void> {
+    const html = this.generateBookingHtml(booking, profile, client);
+    await Print.printAsync({ html });
+  },
+
+  /**
    * Partage direct du PDF vers les applications du système (WhatsApp, Drive, Mail)
    */
   async sharePdf(pdfUri: string, mimeType: string = 'application/pdf'): Promise<void> {

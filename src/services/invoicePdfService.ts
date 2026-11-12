@@ -364,6 +364,19 @@ export const invoicePdfService = {
   },
 
   /**
+   * Ouvre la prévisualisation plein écran / impression de la facture PDF
+   */
+  async previewInvoicePdf(
+    invoice: Invoice,
+    profile: Profile,
+    client: Client,
+    items: InvoiceItem[]
+  ): Promise<void> {
+    const html = this.generateInvoiceHtml(invoice, profile, client, items);
+    await Print.printAsync({ html });
+  },
+
+  /**
    * Partage direct du PDF de facture
    */
   async shareInvoicePdf(pdfUri: string, invoiceNumber: string): Promise<void> {

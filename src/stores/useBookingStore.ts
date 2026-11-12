@@ -18,6 +18,7 @@ interface BookingState {
     userId: string,
     bookingData: {
       client_id: string;
+      reservation_datetime?: string; // Permet au chauffeur de choisir l'heure réelle de réservation
       pickup_datetime: string;
       pickup_address: string;
       dropoff_address: string;
@@ -28,6 +29,8 @@ interface BookingState {
       status?: BookingStatus;
     }
   ) => Promise<Booking>;
+  updateBooking: (id: string, updates: Partial<Booking>) => Promise<boolean>;
+  deleteBooking: (id: string) => Promise<boolean>;
   updateBookingStatus: (id: string, status: BookingStatus) => Promise<boolean>;
   getBookingById: (id: string) => Booking | undefined;
 }
@@ -66,8 +69,9 @@ export const useBookingStore = create<BookingState>((set, get) => ({
   createBooking: async (userId, data) => {
     set({ isCreating: true });
 
-    // Horodatage réel et immuable de réservation (Interdiction légale d'antidater)
+    // Horodatage choisi par le chauffeur ou date/heure actuelle
     const nowIso = new Date().toISOString();
+    const reservationDatetime = data.reservation_datetime || nowIso;
 
     // Numérotation séquentielle continue (ex: BC-2026-0001)
     const bookingNumber = await numberingService.getNextNumber(userId, 'booking');
@@ -77,7 +81,7 @@ export const useBookingStore = create<BookingState>((set, get) => ({
       user_id: userId,
       client_id: data.client_id,
       booking_number: bookingNumber,
-      reservation_datetime: nowIso,
+      reservation_datetime: reservationDatetime,
       pickup_datetime: data.pickup_datetime,
       pickup_address: data.pickup_address,
       dropoff_address: data.dropoff_address,
@@ -127,6 +131,41 @@ export const useBookingStore = create<BookingState>((set, get) => ({
 
     set({ isCreating: false });
     return newBooking;
+  },
+
+  updateBooking: async (id, updates) => {
+    const nowIso = new Date().toISOString();
+    const updatedList = get().bookings.map((b) =>
+      b.id === id ? { ...b, ...updates, updated_at: nowIso } : b
+    );
+    set({ bookings: updatedList });
+    await localStorage.setItem(localStorage.keys.BOOKINGS, updatedList);
+
+    try {
+      await supabase
+        .from('bookings')
+        .update({
+          ...updates,
+          updated_at: nowIso,
+        })
+        .eq('id', id);
+    } catch {
+      // Offline
+    }
+    return true;
+  },
+
+  deleteBooking: async (id) => {
+    const updatedList = get().bookings.filter((b) => b.id !== id);
+    set({ bookings: updatedList });
+    await localStorage.setItem(localStorage.keys.BOOKINGS, updatedList);
+
+    try {
+      await supabase.from('bookings').delete().eq('id', id);
+    } catch {
+      // Offline
+    }
+    return true;
   },
 
   updateBookingStatus: async (id, status) => {

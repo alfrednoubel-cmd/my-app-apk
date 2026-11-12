@@ -42,7 +42,7 @@ export const InvoiceDetailScreen: React.FC<InvoiceDetailScreenProps> = ({
 }) => {
   const { user } = useAuthStore();
   const { profile } = useProfileStore();
-  const { getItemsForInvoice, createCreditNote } = useInvoiceStore();
+  const { getItemsForInvoice, createCreditNote, deleteInvoice, updateInvoice } = useInvoiceStore();
   const {
     payments,
     loadPayments,
@@ -54,6 +54,15 @@ export const InvoiceDetailScreen: React.FC<InvoiceDetailScreenProps> = ({
 
   const [invoice, setInvoice] = useState<Invoice>(initialInvoice);
   const [items, setItems] = useState<InvoiceItem[]>([]);
+
+  // MODAL ÉDITION FACTURE
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editTotalAmount, setEditTotalAmount] = useState(String(initialInvoice.total_ttc));
+  const [editDueDate, setEditDueDate] = useState(initialInvoice.due_date);
+  const [editPaymentTerms, setEditPaymentTerms] = useState(
+    initialInvoice.payment_terms || 'Règlement à réception'
+  );
+  const [editDescription, setEditDescription] = useState('');
 
   // MODAL PAIEMENT
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -71,6 +80,9 @@ export const InvoiceDetailScreen: React.FC<InvoiceDetailScreenProps> = ({
     loadPayments(userId);
     const invoiceItems = getItemsForInvoice(invoice.id);
     setItems(invoiceItems);
+    if (invoiceItems[0]) {
+      setEditDescription(invoiceItems[0].description);
+    }
   }, [invoice.id]);
 
   const invoicePayments = getPaymentsForInvoice(invoice.id);
@@ -78,6 +90,71 @@ export const InvoiceDetailScreen: React.FC<InvoiceDetailScreenProps> = ({
   const remainingBalance = Math.max(0, Number(invoice.total_ttc) - totalPaid);
 
   const isFullyPaid = invoice.status === 'paid' || remainingBalance <= 0.01;
+
+  // Action : Afficher le PDF en plein écran
+  const handlePreviewPdf = async () => {
+    if (!profile) return;
+    try {
+      await invoicePdfService.previewInvoicePdf(invoice, profile, client, items);
+    } catch (err: any) {
+      Alert.alert('Erreur PDF', err.message || 'Impossible d’afficher la facture.');
+    }
+  };
+
+  // Action : Supprimer définitivement la facture
+  const handleDeleteInvoice = () => {
+    Alert.alert(
+      'Supprimer la facture',
+      `Êtes-vous sûr de vouloir supprimer définitivement la facture ${invoice.invoice_number} ?`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            await deleteInvoice(invoice.id);
+            Alert.alert('Supprimée', 'La facture a été supprimée avec succès.');
+            if (onInvoiceUpdated) onInvoiceUpdated();
+            onBack();
+          },
+        },
+      ]
+    );
+  };
+
+  // Action : Enregistrer les modifications de la facture
+  const handleSaveEditInvoice = async () => {
+    const amt = parseFloat(editTotalAmount.replace(',', '.'));
+    if (isNaN(amt) || amt <= 0) {
+      Alert.alert('Erreur', 'Veuillez saisir un montant valide.');
+      return;
+    }
+
+    const updatedItems = items.map((it, idx) =>
+      idx === 0
+        ? {
+            ...it,
+            description: editDescription || it.description,
+            unit_price: amt,
+            total_price: amt,
+          }
+        : it
+    );
+
+    const updates: Partial<Invoice> = {
+      due_date: editDueDate,
+      payment_terms: editPaymentTerms,
+      total_ht: amt,
+      total_ttc: amt,
+    };
+
+    await updateInvoice(invoice.id, updates, updatedItems);
+    setInvoice({ ...invoice, ...updates });
+    setItems(updatedItems);
+    setShowEditModal(false);
+    Alert.alert('Succès', 'La facture a été mise à jour.');
+    if (onInvoiceUpdated) onInvoiceUpdated();
+  };
 
   // Action : Partager le PDF de facture
   const handleSharePdf = async () => {
@@ -214,6 +291,15 @@ export const InvoiceDetailScreen: React.FC<InvoiceDetailScreenProps> = ({
           </View>
         </Card>
 
+        {/* BOUTON D'AFFICHAGE DU PDF PLEIN ÉCRAN */}
+        <Button
+          title="👁️ Afficher la Facture en PDF"
+          onPress={handlePreviewPdf}
+          variant="gold"
+          size="lg"
+          style={{ marginBottom: spacing.md }}
+        />
+
         {/* ACTIONS SUR LE DOCUMENT */}
         <View style={styles.actionRow}>
           <TouchableOpacity
@@ -318,6 +404,29 @@ export const InvoiceDetailScreen: React.FC<InvoiceDetailScreenProps> = ({
             </Text>
           </TouchableOpacity>
         )}
+        {/* BOUTONS DE MODIFICATION ET SUPPRESSION */}
+        <View style={styles.editDeleteRow}>
+          <Button
+            title="✏️ Modifier la facture"
+            onPress={() => {
+              setEditTotalAmount(String(invoice.total_ttc));
+              setEditDueDate(invoice.due_date);
+              setEditPaymentTerms(invoice.payment_terms || 'Règlement à réception');
+              if (items[0]) setEditDescription(items[0].description);
+              setShowEditModal(true);
+            }}
+            variant="outline"
+            size="md"
+            style={styles.halfBtn}
+          />
+          <Button
+            title="🗑️ Supprimer"
+            onPress={handleDeleteInvoice}
+            variant="danger"
+            size="md"
+            style={styles.halfBtn}
+          />
+        </View>
       </ScrollView>
 
       {/* MODAL ENREGISTRER UN PAIEMENT */}
@@ -413,6 +522,60 @@ export const InvoiceDetailScreen: React.FC<InvoiceDetailScreenProps> = ({
                 title="Créer l'Avoir"
                 onPress={handleCreateCreditNote}
                 variant="danger"
+                style={styles.modalBtn}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL MODIFIER LA FACTURE */}
+      <Modal visible={showEditModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Modifier la Facture</Text>
+
+            <Input
+              label="Montant Total TTC (€)"
+              value={editTotalAmount}
+              onChangeText={setEditTotalAmount}
+              keyboardType="numeric"
+              required
+              prefix="💶"
+            />
+
+            <Input
+              label="Désignation de la prestation"
+              value={editDescription}
+              onChangeText={setEditDescription}
+              placeholder="Ex : Transport VTC..."
+            />
+
+            <Input
+              label="Date d'échéance (AAAA-MM-JJ)"
+              value={editDueDate}
+              onChangeText={setEditDueDate}
+              placeholder="2026-11-15"
+            />
+
+            <Input
+              label="Conditions de règlement"
+              value={editPaymentTerms}
+              onChangeText={setEditPaymentTerms}
+              placeholder="Ex : Règlement à réception"
+            />
+
+            <View style={styles.modalActions}>
+              <Button
+                title="Annuler"
+                variant="outline"
+                onPress={() => setShowEditModal(false)}
+                style={styles.modalBtn}
+              />
+              <Button
+                title="Enregistrer"
+                onPress={handleSaveEditInvoice}
+                variant="gold"
                 style={styles.modalBtn}
               />
             </View>
@@ -656,6 +819,15 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   modalBtn: {
+    flex: 1,
+  },
+  editDeleteRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  halfBtn: {
     flex: 1,
   },
 });
