@@ -23,7 +23,7 @@ import { useAuthStore } from '../../stores/useAuthStore';
 import { useClientStore } from '../../stores/useClientStore';
 import { useBookingStore } from '../../stores/useBookingStore';
 import { useProfileStore } from '../../stores/useProfileStore';
-import { Client, Booking } from '../../types/models';
+import * as Location from 'expo-location';
 import { locationService } from '../../services/locationService';
 
 interface QuickBookingScreenProps {
